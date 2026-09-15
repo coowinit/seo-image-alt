@@ -211,12 +211,26 @@ class WIAA_DeepSeek_Client {
 				$message = sprintf( 'DeepSeek API 返回 HTTP %d。', $status_code );
 			}
 
+			$provider_error_code = '';
+			$provider_error_type = '';
+
+			if ( is_array( $decoded ) && isset( $decoded['error'] ) && is_array( $decoded['error'] ) ) {
+				if ( isset( $decoded['error']['code'] ) && is_scalar( $decoded['error']['code'] ) ) {
+					$provider_error_code = sanitize_text_field( (string) $decoded['error']['code'] );
+				}
+				if ( isset( $decoded['error']['type'] ) && is_scalar( $decoded['error']['type'] ) ) {
+					$provider_error_type = sanitize_text_field( (string) $decoded['error']['type'] );
+				}
+			}
+
 			return new WP_Error(
 				'wiaa_deepseek_api_error',
 				$message,
 				array(
-					'status_code' => $status_code,
-					'retry_after' => $retry_after,
+					'status_code'         => $status_code,
+					'retry_after'         => $retry_after,
+					'provider_error_code' => $provider_error_code,
+					'provider_error_type' => $provider_error_type,
 				)
 			);
 		}

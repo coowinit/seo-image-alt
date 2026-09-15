@@ -3,7 +3,7 @@
  * Plugin Name: WEM Image ALT Assistant
  * Plugin URI:  https://github.com/coowinit/seo-image-alt
  * Description: 扫描 WordPress 媒体库图片，结合页面上下文通过 DeepSeek Vision 生成候选 ALT，支持人工审核、安全写入与大型媒体库全站批量任务。
- * Version:     1.1.1
+ * Version:     1.1.2
  * Author:      COOWIN
  * License:     GPL-2.0-or-later
  * License URI: https://www.gnu.org/licenses/gpl-2.0.html
@@ -16,7 +16,7 @@ if ( ! defined( 'ABSPATH' ) ) {
 	exit;
 }
 
-define( 'WIAA_VERSION', '1.1.1' );
+define( 'WIAA_VERSION', '1.1.2' );
 define( 'WIAA_FILE', __FILE__ );
 define( 'WIAA_PATH', plugin_dir_path( __FILE__ ) );
 define( 'WIAA_URL', plugin_dir_url( __FILE__ ) );

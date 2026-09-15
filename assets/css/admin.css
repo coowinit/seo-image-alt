@@ -989,3 +989,10 @@ body.wiaa-modal-open {
 		justify-content: flex-start;
 	}
 }
+
+/* v1.1.2 · current blocked image in global task */
+.wiaa-global-current {
+	margin: 10px 0 4px;
+	font-weight: 600;
+	color: #1d2327;
+}

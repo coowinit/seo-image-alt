@@ -12,9 +12,15 @@ if ( ! defined( 'ABSPATH' ) ) {
 class WIAA_Alt_Generator {
 
 	/**
-	 * Base64 inline threshold. Larger images use a URL to reduce PHP memory use.
+	 * Base64 inline threshold. Prefer WordPress-generated local sizes so large
+	 * originals do not force a remote URL request.
 	 */
 	const INLINE_MAX_BYTES = 8388608; // 8 MiB.
+
+	/**
+	 * Preferred WordPress image sizes for Vision input.
+	 */
+	const PREFERRED_IMAGE_SIZES = array( 'large', 'medium_large', 'medium' );
 	const OPTION_ALT_LANGUAGE = 'wiaa_alt_language';
 	const DEFAULT_ALT_LANGUAGE = 'auto';
 
@@ -525,37 +531,134 @@ class WIAA_Alt_Generator {
 	}
 
 	/**
-	 * Prefer a local base64 source so private/staging sites also work.
+	 * Build the Vision image source.
+	 *
+	 * Prefer local WordPress-generated image sizes and send them as Base64. This
+	 * avoids remote-download failures caused by Chinese / non-ASCII filenames,
+	 * Basic Auth, Cloudflare rules or private staging sites. Only use a public URL
+	 * as the final fallback.
 	 *
 	 * @param int    $attachment_id Attachment ID.
-	 * @param string $mime          MIME.
+	 * @param string $mime          Original MIME.
 	 * @return string|WP_Error
 	 */
 	private function get_image_source( $attachment_id, $mime ) {
-		$file = get_attached_file( $attachment_id );
+		$original = get_attached_file( $attachment_id );
+		$metadata = wp_get_attachment_metadata( $attachment_id );
 
-		if ( $file && is_readable( $file ) ) {
-			$size = @filesize( $file ); // phpcs:ignore WordPress.PHP.NoSilencedErrors.Discouraged
+		// Animated GIFs are best represented by the original when reasonably small.
+		if ( 'image/gif' === $mime ) {
+			$source = $this->local_file_to_data_url( $original, $mime );
+			if ( $source ) {
+				return $source;
+			}
+		}
 
-			if ( false !== $size && $size > 0 && $size <= self::INLINE_MAX_BYTES ) {
-				$contents = @file_get_contents( $file ); // phpcs:ignore WordPress.WP.AlternativeFunctions.file_get_contents_file_get_contents, WordPress.PHP.NoSilencedErrors.Discouraged
+		// Prefer WordPress-generated ~1024px variants before the full original.
+		if ( $original && is_array( $metadata ) && ! empty( $metadata['sizes'] ) && is_array( $metadata['sizes'] ) ) {
+			$base_dir = dirname( $original );
 
-				if ( false !== $contents ) {
-					return 'data:' . $mime . ';base64,' . base64_encode( $contents );
+			foreach ( self::PREFERRED_IMAGE_SIZES as $size_name ) {
+				if ( empty( $metadata['sizes'][ $size_name ]['file'] ) ) {
+					continue;
+				}
+
+				$variant_file = trailingslashit( $base_dir ) . wp_basename( $metadata['sizes'][ $size_name ]['file'] );
+				$variant_mime = ! empty( $metadata['sizes'][ $size_name ]['mime-type'] )
+					? (string) $metadata['sizes'][ $size_name ]['mime-type']
+					: $mime;
+				$source = $this->local_file_to_data_url( $variant_file, $variant_mime );
+
+				if ( $source ) {
+					return $source;
 				}
 			}
 		}
 
-		$url = wp_get_attachment_url( $attachment_id );
+		// If no suitable intermediate size exists, use the local original when safe.
+		$source = $this->local_file_to_data_url( $original, $mime );
+		if ( $source ) {
+			return $source;
+		}
 
+		// Last resort only: send a public URL with path segments percent-encoded.
+		$url = wp_get_attachment_url( $attachment_id );
 		if ( $url && preg_match( '#^https?://#i', $url ) ) {
-			return $url;
+			return $this->encode_remote_image_url( $url );
 		}
 
 		return new WP_Error(
 			'wiaa_image_source_unavailable',
 			'无法读取本地图片，也没有可供 DeepSeek 访问的 HTTP(S) 图片 URL。'
 		);
+	}
+
+	/**
+	 * Convert a readable local image to a data URL when it is within the limit.
+	 *
+	 * @param string|false $file Local path.
+	 * @param string       $mime MIME type.
+	 * @return string
+	 */
+	private function local_file_to_data_url( $file, $mime ) {
+		if ( ! $file || ! is_readable( $file ) ) {
+			return '';
+		}
+
+		$size = @filesize( $file ); // phpcs:ignore WordPress.PHP.NoSilencedErrors.Discouraged
+		if ( false === $size || $size <= 0 || $size > self::INLINE_MAX_BYTES ) {
+			return '';
+		}
+
+		$contents = @file_get_contents( $file ); // phpcs:ignore WordPress.WP.AlternativeFunctions.file_get_contents_file_get_contents, WordPress.PHP.NoSilencedErrors.Discouraged
+		if ( false === $contents ) {
+			return '';
+		}
+
+		$checked = wp_check_filetype( $file );
+		if ( ! empty( $checked['type'] ) && 0 === strpos( (string) $checked['type'], 'image/' ) ) {
+			$mime = (string) $checked['type'];
+		}
+
+		return 'data:' . $mime . ';base64,' . base64_encode( $contents );
+	}
+
+	/**
+	 * Percent-encode URL path segments without double-encoding existing escapes.
+	 *
+	 * @param string $url Public image URL.
+	 * @return string
+	 */
+	private function encode_remote_image_url( $url ) {
+		$parts = wp_parse_url( $url );
+		if ( ! is_array( $parts ) || empty( $parts['scheme'] ) || empty( $parts['host'] ) ) {
+			return $url;
+		}
+
+		$path = isset( $parts['path'] ) ? (string) $parts['path'] : '';
+		if ( '' !== $path ) {
+			$segments = explode( '/', $path );
+			foreach ( $segments as &$segment ) {
+				$segment = rawurlencode( rawurldecode( $segment ) );
+			}
+			unset( $segment );
+			$path = implode( '/', $segments );
+		}
+
+		$encoded = $parts['scheme'] . '://' . $parts['host'];
+		if ( ! empty( $parts['port'] ) ) {
+			$encoded .= ':' . absint( $parts['port'] );
+		}
+		$encoded .= $path;
+
+		if ( isset( $parts['query'] ) && '' !== $parts['query'] ) {
+			$encoded .= '?' . $parts['query'];
+		}
+		if ( isset( $parts['fragment'] ) && '' !== $parts['fragment'] ) {
+			$encoded .= '#' . rawurlencode( rawurldecode( $parts['fragment'] ) );
+		}
+
+		return $encoded;
 	}
 
 	private function clean_candidate( $candidate ) {

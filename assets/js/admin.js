@@ -654,7 +654,7 @@
 		}
 	});
 
-	// v1.1.1 · persistent site-wide tasks + visible 20-image test results.
+	// v1.1.2 · persistent site-wide tasks + visible tests + isolated image failures.
 	const globalBulk = document.getElementById('wiaa-global-bulk');
 	let currentBulkTask = cfg.bulkTask || null;
 	let bulkLoopBusy = false;
@@ -803,12 +803,22 @@
 		const excludedWrap = globalBulk.querySelector('[data-bulk-excluded-wrap]');
 		if (excludedWrap) excludedWrap.hidden = !(Number(task.excluded || 0) > 0);
 
+		const currentItem = globalBulk.querySelector('[data-bulk-current-item]');
+		if (currentItem) {
+			const item = task.current_item || null;
+			const showCurrent = !!(item && ['error', 'paused'].includes(task.status));
+			currentItem.hidden = !showCurrent;
+			currentItem.textContent = showCurrent
+				? '当前图片：' + (item.filename || item.title || ('Attachment #' + item.id)) + ' · ID ' + item.id
+				: '';
+		}
+
 		let message = '';
 		if (task.status === 'cooldown') {
 			const remaining = Math.max(0, Math.ceil(((Number(task.cooldown_until || 0) * 1000) - Date.now()) / 1000));
 			message = 'DeepSeek 返回限流信号，约 ' + remaining + ' 秒后自动继续。';
 		} else if (task.status === 'error') {
-			message = '任务已暂停：' + (task.last_error || 'API 配置或请求异常。修复后可点击“继续”。');
+			message = '任务已暂停：' + (task.last_error || 'API 配置或请求异常。修复后可点击“重新尝试 / 继续”。');
 		} else if (task.status === 'paused') {
 			message = '任务已暂停，可随时继续。';
 		} else if (task.status === 'completed') {
@@ -832,9 +842,14 @@
 
 		const pause = globalBulk.querySelector('[data-bulk-control="pause"]');
 		const resume = globalBulk.querySelector('[data-bulk-control="resume"]');
+		const skip = globalBulk.querySelector('[data-bulk-control="skip"]');
 		const stop = globalBulk.querySelector('[data-bulk-control="stop"]');
 		if (pause) pause.disabled = !['running', 'cooldown'].includes(task.status);
 		if (resume) resume.disabled = !['paused', 'error'].includes(task.status);
+		if (skip) {
+			skip.hidden = !(task.status === 'error' && task.operation === 'generate' && task.current_item);
+			skip.disabled = skip.hidden;
+		}
 		if (stop) stop.disabled = ['completed', 'stopped'].includes(task.status);
 	}
 
@@ -969,6 +984,7 @@
 			if (control) {
 				const action = control.dataset.bulkControl || '';
 				if (action === 'stop' && !window.confirm('确认停止当前任务？已经完成的结果会保留。')) return;
+				if (action === 'skip' && !window.confirm('确认跳过当前异常图片并继续后面的任务？该图片仍会保留在失败列表，方便之后单独处理。')) return;
 				control.disabled = true;
 				api('wiaa_bulk_control', { control: action }).then((data) => {
 					renderBulkTask(data.task || null);

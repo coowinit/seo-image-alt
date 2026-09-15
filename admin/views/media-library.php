@@ -57,7 +57,7 @@ $colspan          = $show_current_alt ? 7 : 6;
 	<section class="wiaa-global-bulk" id="wiaa-global-bulk">
 		<div class="wiaa-global-bulk-head">
 			<div>
-				<span class="wiaa-eyebrow">v1.1 全站批量任务</span>
+				<span class="wiaa-eyebrow">v1.1.2 全站批量任务</span>
 				<h2>大型媒体库模式</h2>
 				<p>不再受每页 20 张限制。AI 生成按图片顺序逐张执行并持久化进度；审核与应用使用服务器小批次处理。关闭或刷新页面后，重新打开即可继续。</p>
 			</div>
@@ -86,11 +86,13 @@ $colspan          = $show_current_alt ? 7 : 6;
 				<span>跳过 <strong data-bulk-skipped>0</strong></span>
 				<span data-bulk-excluded-wrap hidden>未进入任务 <strong data-bulk-excluded>0</strong></span>
 			</div>
+			<p class="wiaa-global-current" data-bulk-current-item hidden></p>
 			<p class="wiaa-global-message" data-bulk-message></p>
 			<div class="wiaa-global-controls">
 				<button type="button" class="button button-primary" data-test-results-toggle hidden>查看测试结果</button>
 				<button type="button" class="button" data-bulk-control="pause">暂停</button>
-				<button type="button" class="button button-primary" data-bulk-control="resume">继续</button>
+				<button type="button" class="button button-primary" data-bulk-control="resume">重新尝试 / 继续</button>
+				<button type="button" class="button" data-bulk-control="skip" hidden>跳过当前图片并继续</button>
 				<button type="button" class="button" data-bulk-control="stop">停止任务</button>
 			</div>
 		</div>

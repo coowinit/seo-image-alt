@@ -213,7 +213,7 @@ class WIAA_Bulk_Task_Manager {
 	/**
 	 * Pause/resume/stop the current task.
 	 *
-	 * @param string $action pause|resume|stop.
+	 * @param string $action pause|resume|skip|stop.
 	 * @return array<string,mixed>|WP_Error
 	 */
 	public function control( $action ) {
@@ -240,6 +240,19 @@ class WIAA_Bulk_Task_Manager {
 					$task['cooldown_until'] = 0;
 					$task['retry_count']    = 0;
 				}
+				break;
+
+			case 'skip':
+				if ( 'generate' !== $task['operation'] || 'error' !== $task['status'] || (int) $task['cursor'] >= (int) $task['total'] ) {
+					return new WP_Error( 'wiaa_bulk_cannot_skip', '当前任务没有可跳过的异常图片。' );
+				}
+
+				$this->advance( $task, 'skipped' );
+				$task['status']         = (int) $task['cursor'] >= (int) $task['total'] ? 'completed' : 'running';
+				$task['pause_reason']   = '';
+				$task['cooldown_until'] = 0;
+				$task['retry_count']    = 0;
+				$task['last_error']     = '';
 				break;
 
 			case 'stop':
@@ -297,14 +310,25 @@ class WIAA_Bulk_Task_Manager {
 			return;
 		}
 
-		// Authentication / model / request errors normally affect the whole queue.
-		if ( in_array( $status_code, array( 400, 401, 402, 403, 404, 422 ), true ) ) {
+		// A failure that belongs to one image must never block a 1000+ image queue.
+		if ( $this->is_single_image_error( $error_code, $status_code, $message ) ) {
+			$task['retry_count'] = 0;
+			$this->advance( $task, 'failed' );
+			return;
+		}
+
+		// Authentication, quota, model or malformed-request errors usually affect
+		// every following item. Pause so the operator can fix the configuration.
+		if ( $this->is_global_api_error( $status_code, $message ) ) {
 			$task['status']       = 'error';
 			$task['pause_reason'] = 'api_error';
 			return;
 		}
 
-		$retryable = 0 === $status_code || $status_code >= 500 || 'wiaa_deepseek_transport_error' === $error_code || 'wiaa_deepseek_empty_response' === $error_code;
+		$retryable = $status_code >= 500
+			|| 'wiaa_deepseek_transport_error' === $error_code
+			|| 'wiaa_deepseek_empty_response' === $error_code
+			|| 'wiaa_deepseek_invalid_json' === $error_code;
 
 		if ( $retryable && (int) $task['retry_count'] < self::MAX_RETRIES ) {
 			$task['retry_count'] = (int) $task['retry_count'] + 1;
@@ -313,6 +337,91 @@ class WIAA_Bulk_Task_Manager {
 
 		$task['retry_count'] = 0;
 		$this->advance( $task, 'failed' );
+	}
+
+	/**
+	 * Decide whether an error only belongs to the current image.
+	 *
+	 * @param string $error_code  WP_Error code.
+	 * @param int    $status_code HTTP status code.
+	 * @param string $message     Provider message.
+	 * @return bool
+	 */
+	private function is_single_image_error( $error_code, $status_code, $message ) {
+		if ( in_array( $error_code, array( 'wiaa_image_source_unavailable', 'wiaa_unsupported_image_type', 'wiaa_invalid_attachment' ), true ) ) {
+			return true;
+		}
+
+		if ( 'wiaa_alt_already_exists' === $error_code ) {
+			return true;
+		}
+
+		$message = strtolower( (string) $message );
+		$image_markers = array(
+			'failed to download image',
+			'cannot download image',
+			'could not download image',
+			'invalid image',
+			'image url',
+			'image_url',
+			'unsupported image',
+			'image format',
+			'image file',
+			'corrupt image',
+			'corrupted image',
+			'image size',
+			'image resolution',
+			'base64 image',
+			'data:image/',
+		);
+
+		foreach ( $image_markers as $marker ) {
+			if ( false !== strpos( $message, $marker ) ) {
+				return true;
+			}
+		}
+
+		return false;
+	}
+
+	/**
+	 * Decide whether continuing the queue would likely repeat the same failure.
+	 *
+	 * @param int    $status_code HTTP status code.
+	 * @param string $message     Provider message.
+	 * @return bool
+	 */
+	private function is_global_api_error( $status_code, $message ) {
+		if ( in_array( $status_code, array( 401, 402, 403 ), true ) ) {
+			return true;
+		}
+
+		$message = strtolower( (string) $message );
+		$global_markers = array(
+			'api key',
+			'authentication',
+			'unauthorized',
+			'permission',
+			'insufficient balance',
+			'quota',
+			'credit',
+			'model not found',
+			'model does not exist',
+			'unknown model',
+			'invalid model',
+			'unsupported model',
+			'unsupported parameter',
+			'unknown parameter',
+			'invalid request',
+		);
+
+		foreach ( $global_markers as $marker ) {
+			if ( false !== strpos( $message, $marker ) ) {
+				return true;
+			}
+		}
+
+		return in_array( $status_code, array( 400, 404, 422 ), true );
 	}
 
 	private function step_local_batch( array &$task ) {
@@ -552,6 +661,20 @@ class WIAA_Bulk_Task_Manager {
 
 		if ( ! empty( $task['is_test'] ) && (int) $task['processed'] > 0 && in_array( $task['status'], array( 'completed', 'paused', 'stopped', 'error' ), true ) ) {
 			$public['test_results'] = $this->get_test_results( $task );
+		}
+
+		$public['current_item'] = null;
+		if ( 'generate' === $task['operation'] && isset( $task['ids'][ $task['cursor'] ] ) ) {
+			$current_id = absint( $task['ids'][ $task['cursor'] ] );
+			$current    = $current_id ? get_post( $current_id ) : null;
+			if ( $current instanceof WP_Post && 'attachment' === $current->post_type ) {
+				$file = get_attached_file( $current_id );
+				$public['current_item'] = array(
+					'id'       => $current_id,
+					'title'    => get_the_title( $current_id ),
+					'filename' => $file ? wp_basename( $file ) : '',
+				);
+			}
 		}
 
 		unset( $public['ids'] );
