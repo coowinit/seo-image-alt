@@ -544,6 +544,372 @@ _wiaa_applied_at
 
 ---
 
+
+## 主题模板中如何读取 ALT
+
+WEM Image ALT Assistant 最终把人工审核通过的 ALT 写入 WordPress 原生字段：
+
+```text
+_wp_attachment_image_alt
+```
+
+因此，主题模板不需要调用插件私有接口，只要按照 WordPress 原生方式读取图片 ALT 即可。
+
+> **ALT 数据属于 WordPress 媒体库，而不是只属于本插件。**
+
+即使以后停用 WEM Image ALT Assistant，只要媒体附件仍然存在，已经写入的 ALT 仍然可以被主题模板正常读取。
+
+### 方式一：已知 Attachment ID 时，优先使用 WordPress 原生图片函数
+
+如果自定义字段保存的是媒体附件 ID，推荐直接使用：
+
+```php
+$image_id = 123;
+
+echo wp_get_attachment_image(
+    $image_id,
+    'full'
+);
+```
+
+WordPress 会自动生成 `<img>`，并读取 `_wp_attachment_image_alt`，同时处理：
+
+- `src`；
+- `width` / `height`；
+- `srcset`；
+- `sizes`；
+- `loading`；
+- `decoding`。
+
+如果只需要单独读取 ALT：
+
+```php
+$image_alt = get_post_meta(
+    $image_id,
+    '_wp_attachment_image_alt',
+    true
+);
+```
+
+输出时使用：
+
+```php
+alt="<?php echo esc_attr( $image_alt ); ?>"
+```
+
+### 方式二：只有图片 URL 时，通过 URL 找到 Attachment ID
+
+一些旧主题或自定义字段保存的是图片 URL，而不是 Attachment ID。
+
+可以在主题 `functions.php` 中增加一个辅助函数：
+
+```php
+/**
+ * 根据 WordPress 媒体库图片 URL 获取原生 ALT。
+ *
+ * @param string $image_url 图片 URL。
+ * @param string $fallback  找不到媒体附件时的备用 ALT。
+ * @return string
+ */
+function wem_get_image_alt_by_url( $image_url, $fallback = '' ) {
+
+    if ( empty( $image_url ) ) {
+        return $fallback;
+    }
+
+    // 去掉 ?ver= 等查询参数。
+    $clean_url = strtok( $image_url, '?' );
+
+    // 根据上传图片 URL 获取 Attachment ID。
+    $attachment_id = attachment_url_to_postid( $clean_url );
+
+    if ( $attachment_id ) {
+        return trim(
+            (string) get_post_meta(
+                $attachment_id,
+                '_wp_attachment_image_alt',
+                true
+            )
+        );
+    }
+
+    return $fallback;
+}
+```
+
+然后在模板中：
+
+```php
+$pic01 = get_post_meta(
+    get_the_ID(),
+    'product_mainimg01',
+    true
+);
+
+$alt01 = wem_get_image_alt_by_url( $pic01 );
+```
+
+HTML：
+
+```php
+<img
+    src="<?php echo esc_url( $pic01 ); ?>"
+    alt="<?php echo esc_attr( $alt01 ); ?>"
+>
+```
+
+这样，插件后台审核并应用的 ALT 会自动进入主题前台输出。
+
+### 产品双图切换示例
+
+旧主题中常见：
+
+```php
+$pic01 = get_post_meta( get_the_ID(), 'product_mainimg01', true );
+$pic02 = get_post_meta( get_the_ID(), 'product_mainimg02', true );
+```
+
+可以改成：
+
+```php
+<?php
+$pic01 = get_post_meta( get_the_ID(), 'product_mainimg01', true );
+$pic02 = get_post_meta( get_the_ID(), 'product_mainimg02', true );
+
+$alt01 = wem_get_image_alt_by_url( $pic01 );
+$alt02 = wem_get_image_alt_by_url( $pic02 );
+?>
+
+<a class="hover-switch" href="<?php the_permalink(); ?>">
+    <img
+        width="770"
+        height="500"
+        src="<?php echo esc_url( $pic01 ); ?>"
+        alt="<?php echo esc_attr( $alt01 ); ?>"
+    >
+
+    <img
+        width="770"
+        height="500"
+        src="<?php echo esc_url( $pic02 ); ?>"
+        alt="<?php echo esc_attr( $alt02 ); ?>"
+    >
+</a>
+```
+
+不要继续使用：
+
+```html
+alt="The first image"
+alt="The second image"
+```
+
+这类占位式 ALT。
+
+### WordPress 特色图片
+
+对于 Post / Page 的特色图片，优先使用：
+
+```php
+<?php the_post_thumbnail( 'full' ); ?>
+```
+
+而不是自己获取 `the_post_thumbnail_url()` 后再拼接一个空 `alt`。
+
+例如：
+
+```php
+<div class="picbox">
+    <a href="<?php the_permalink(); ?>">
+        <?php the_post_thumbnail( 'full' ); ?>
+    </a>
+</div>
+```
+
+`the_post_thumbnail()` 会基于 Attachment ID 生成 WordPress 原生图片 HTML，并读取媒体库 ALT。
+
+### 固定上传目录图片
+
+如果模板中直接写了：
+
+```html
+<img
+    src="/wp-content/uploads/2024/12/free-samples01.webp"
+    alt=""
+>
+```
+
+也可以先转换成完整 URL：
+
+```php
+$image_url = home_url(
+    '/wp-content/uploads/2024/12/free-samples01.webp'
+);
+
+$image_alt = wem_get_image_alt_by_url(
+    $image_url,
+    'Composite decking free samples'
+);
+```
+
+再输出：
+
+```php
+<img
+    src="<?php echo esc_url( $image_url ); ?>"
+    alt="<?php echo esc_attr( $image_alt ); ?>"
+>
+```
+
+第二个参数只是在无法找到 Attachment 时使用的备用 ALT。
+
+### 装饰性图片不要强行读取文字 ALT
+
+不是所有图片都应该有描述性 ALT。
+
+例如：
+
+- 数字装饰图；
+- 分隔元素；
+- 已经有相邻文字说明的纯装饰图标；
+- 不承担独立信息的视觉元素。
+
+这类图片可以继续使用：
+
+```html
+alt=""
+```
+
+例如图标旁边已经有 “Free Samples / About Us / Contact Us”，图标本身通常保持空 ALT 更合适，避免屏幕阅读器重复朗读。
+
+### CSS `background-image` 没有 ALT
+
+例如：
+
+```html
+<div
+    class="swiper-slide"
+    style="background-image: url(...);"
+>
+```
+
+CSS 背景图片本身没有 HTML `alt` 属性。
+
+如果图片只是视觉背景，可以保持这种实现；如果图片本身承担重要信息，应考虑改成真正的 `<img>`，再使用 WordPress 原生 ALT。
+
+### 推荐的数据存储方式
+
+对于新的 WordPress 主题或内容模型，优先保存：
+
+```text
+Attachment ID
+```
+
+而不是只保存：
+
+```text
+Image URL
+```
+
+推荐：
+
+```php
+$image_id = get_post_meta(
+    get_the_ID(),
+    'product_image_id',
+    true
+);
+
+echo wp_get_attachment_image(
+    $image_id,
+    'full'
+);
+```
+
+Attachment ID 可以直接关联：
+
+- ALT；
+- Caption；
+- Title；
+- 图片尺寸；
+- `srcset`；
+- `sizes`；
+- Attachment Metadata。
+
+如果旧项目已经保存 URL，则使用 `attachment_url_to_postid()` 作为兼容方案即可。
+
+### 模板开发建议
+
+推荐遵循：
+
+```text
+Attachment ID
+→ wp_get_attachment_image()
+→ 最优先
+
+Image URL
+→ attachment_url_to_postid()
+→ 兼容旧主题
+
+Featured Image
+→ the_post_thumbnail()
+
+Decorative Image
+→ alt=""
+
+CSS Background
+→ 不存在 ALT
+```
+
+输出自定义 `<img>` 时至少使用：
+
+```php
+esc_url()
+esc_attr()
+```
+
+分别处理 `src` 和 `alt`。
+
+### 与插件的关系
+
+WEM Image ALT Assistant 负责：
+
+```text
+扫描
+↓
+AI 生成候选
+↓
+人工审核
+↓
+安全写入 WordPress 原生 ALT
+```
+
+主题模板负责：
+
+```text
+Attachment ID / Image URL
+↓
+读取 _wp_attachment_image_alt
+↓
+输出到 <img alt="">
+```
+
+两者通过 WordPress 原生媒体数据连接，不需要让主题依赖插件内部类或函数：
+
+```text
+WEM Image ALT Assistant
+        ↓
+_wp_attachment_image_alt
+        ↓
+WordPress Theme
+        ↓
+Frontend HTML
+```
+
+这也是本项目坚持 WordPress Native 的重要原因之一。
+
+---
+
 ## 开发者扩展
 
 插件提供：
