@@ -1,9 +1,9 @@
 <?php
 /**
  * Plugin Name: WEM Image ALT Assistant
- * Plugin URI:  https://github.com/coowinit/wem-image-alt-assistant
- * Description: 扫描 WordPress 媒体库缺失 ALT 的图片，结合图片与页面上下文通过 DeepSeek Vision 生成候选 ALT，经人工审核后保存。
- * Version:     1.0.0
+ * Plugin URI:  https://github.com/coowinit/seo-image-alt
+ * Description: 扫描 WordPress 媒体库图片，结合页面上下文通过 DeepSeek Vision 生成候选 ALT，支持人工审核、安全写入与大型媒体库全站批量任务。
+ * Version:     1.1.1
  * Author:      COOWIN
  * License:     GPL-2.0-or-later
  * License URI: https://www.gnu.org/licenses/gpl-2.0.html
@@ -16,7 +16,7 @@ if ( ! defined( 'ABSPATH' ) ) {
 	exit;
 }
 
-define( 'WIAA_VERSION', '1.0.0' );
+define( 'WIAA_VERSION', '1.1.1' );
 define( 'WIAA_FILE', __FILE__ );
 define( 'WIAA_PATH', plugin_dir_path( __FILE__ ) );
 define( 'WIAA_URL', plugin_dir_url( __FILE__ ) );
@@ -31,6 +31,7 @@ require_once WIAA_PATH . 'includes/class-wiaa-deepseek-client.php';
 require_once WIAA_PATH . 'includes/class-wiaa-alt-generator.php';
 require_once WIAA_PATH . 'includes/class-wiaa-frontend-auditor.php';
 require_once WIAA_PATH . 'includes/class-wiaa-legacy-candidate-migrator.php';
+require_once WIAA_PATH . 'includes/class-wiaa-bulk-task-manager.php';
 require_once WIAA_PATH . 'admin/class-wiaa-admin.php';
 
 /**
@@ -85,10 +86,11 @@ function wiaa_boot() {
 	$generator = new WIAA_Alt_Generator( $context, $deepseek );
 	$auditor   = new WIAA_Frontend_Auditor();
 	$migrator  = new WIAA_Legacy_Candidate_Migrator( $generator );
+	$bulk      = new WIAA_Bulk_Task_Manager( $scanner, $generator, $deepseek );
 
 	$migrator->register();
 
-	$admin = new WIAA_Admin( $scanner, $deepseek, $generator, $auditor );
+	$admin = new WIAA_Admin( $scanner, $deepseek, $generator, $auditor, $bulk );
 	$admin->register();
 }
 add_action( 'plugins_loaded', 'wiaa_boot' );

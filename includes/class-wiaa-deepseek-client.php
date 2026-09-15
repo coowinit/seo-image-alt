@@ -196,6 +196,7 @@ class WIAA_DeepSeek_Client {
 		}
 
 		$status_code = (int) wp_remote_retrieve_response_code( $response );
+		$retry_after = absint( wp_remote_retrieve_header( $response, 'retry-after' ) );
 		$raw_body    = wp_remote_retrieve_body( $response );
 		$decoded     = json_decode( $raw_body, true );
 
@@ -213,7 +214,10 @@ class WIAA_DeepSeek_Client {
 			return new WP_Error(
 				'wiaa_deepseek_api_error',
 				$message,
-				array( 'status_code' => $status_code )
+				array(
+					'status_code' => $status_code,
+					'retry_after' => $retry_after,
+				)
 			);
 		}
 

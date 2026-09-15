@@ -15,15 +15,17 @@ class WIAA_Admin {
 	private $deepseek;
 	private $generator;
 	private $auditor;
+	private $bulk_tasks;
 	private $page_hook = '';
 	private $audit_hook = '';
 	private $settings_hook = '';
 
-	public function __construct( WIAA_Image_Scanner $scanner, WIAA_DeepSeek_Client $deepseek, WIAA_Alt_Generator $generator, WIAA_Frontend_Auditor $auditor ) {
-		$this->scanner   = $scanner;
-		$this->deepseek  = $deepseek;
-		$this->generator = $generator;
-		$this->auditor   = $auditor;
+	public function __construct( WIAA_Image_Scanner $scanner, WIAA_DeepSeek_Client $deepseek, WIAA_Alt_Generator $generator, WIAA_Frontend_Auditor $auditor, WIAA_Bulk_Task_Manager $bulk_tasks ) {
+		$this->scanner    = $scanner;
+		$this->deepseek   = $deepseek;
+		$this->generator  = $generator;
+		$this->auditor    = $auditor;
+		$this->bulk_tasks = $bulk_tasks;
 	}
 
 	public function register() {
@@ -40,6 +42,10 @@ class WIAA_Admin {
 		add_action( 'wp_ajax_wiaa_mark_no_alt', array( $this, 'ajax_mark_no_alt' ) );
 		add_action( 'wp_ajax_wiaa_restore_pending', array( $this, 'ajax_restore_pending' ) );
 		add_action( 'wp_ajax_wiaa_get_counts', array( $this, 'ajax_get_counts' ) );
+		add_action( 'wp_ajax_wiaa_bulk_create', array( $this, 'ajax_bulk_create' ) );
+		add_action( 'wp_ajax_wiaa_bulk_step', array( $this, 'ajax_bulk_step' ) );
+		add_action( 'wp_ajax_wiaa_bulk_control', array( $this, 'ajax_bulk_control' ) );
+		add_action( 'wp_ajax_wiaa_bulk_get', array( $this, 'ajax_bulk_get' ) );
 	}
 
 	public function register_menu() {
@@ -109,6 +115,8 @@ class WIAA_Admin {
 					'ajaxUrl' => admin_url( 'admin-ajax.php' ),
 					'nonce'   => wp_create_nonce( 'wiaa_admin' ),
 					'canManage' => current_user_can( WIAA_CAP_MANAGE ),
+					'bulkTask' => $this->bulk_tasks->get_public_task(),
+					'isConfigured' => $this->deepseek->is_configured(),
 					'strings' => array(
 						'generating' => '正在生成…',
 						'applying'   => '正在应用…',
@@ -147,6 +155,7 @@ class WIAA_Admin {
 		);
 		$counts        = $this->scanner->get_counts();
 		$is_configured = $this->deepseek->is_configured();
+		$bulk_task     = $this->bulk_tasks->get_public_task();
 
 		include WIAA_PATH . 'admin/views/media-library.php';
 	}
@@ -374,6 +383,74 @@ class WIAA_Admin {
 	public function ajax_get_counts() {
 		$this->check_ajax_permission();
 		wp_send_json_success( array( 'counts' => $this->scanner->get_counts() ) );
+	}
+
+
+	public function ajax_bulk_create() {
+		$this->check_ajax_permission();
+
+		$operation = isset( $_POST['operation'] ) ? sanitize_key( wp_unslash( $_POST['operation'] ) ) : '';
+		$scope     = isset( $_POST['scope'] ) ? sanitize_key( wp_unslash( $_POST['scope'] ) ) : 'pending';
+		$limit     = isset( $_POST['limit'] ) ? absint( $_POST['limit'] ) : 0;
+
+		$result = $this->bulk_tasks->create_task( $operation, $scope, $limit );
+		if ( is_wp_error( $result ) ) {
+			$this->send_error_with_counts( $result->get_error_message() );
+		}
+
+		wp_send_json_success(
+			array(
+				'task'   => $result,
+				'counts' => $this->scanner->get_counts(),
+			)
+		);
+	}
+
+	public function ajax_bulk_step() {
+		$this->check_ajax_permission();
+
+		$result = $this->bulk_tasks->step();
+		if ( is_wp_error( $result ) ) {
+			$this->send_error_with_counts( $result->get_error_message() );
+		}
+
+		$data = array( 'task' => $result );
+		$processed = isset( $result['processed'] ) ? absint( $result['processed'] ) : 0;
+		$status    = isset( $result['status'] ) ? sanitize_key( (string) $result['status'] ) : '';
+
+		if ( 0 === $processed % 10 || in_array( $status, array( 'completed', 'error', 'paused', 'stopped' ), true ) ) {
+			$data['counts'] = $this->scanner->get_counts();
+		}
+
+		wp_send_json_success( $data );
+	}
+
+	public function ajax_bulk_control() {
+		$this->check_ajax_permission();
+
+		$control = isset( $_POST['control'] ) ? sanitize_key( wp_unslash( $_POST['control'] ) ) : '';
+		$result  = $this->bulk_tasks->control( $control );
+
+		if ( is_wp_error( $result ) ) {
+			$this->send_error_with_counts( $result->get_error_message() );
+		}
+
+		wp_send_json_success(
+			array(
+				'task'   => $result,
+				'counts' => $this->scanner->get_counts(),
+			)
+		);
+	}
+
+	public function ajax_bulk_get() {
+		$this->check_ajax_permission();
+		wp_send_json_success(
+			array(
+				'task'   => $this->bulk_tasks->get_public_task(),
+				'counts' => $this->scanner->get_counts(),
+			)
+		);
 	}
 
 	private function get_editable_attachment_id() {

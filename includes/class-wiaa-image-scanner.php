@@ -200,7 +200,7 @@ class WIAA_Image_Scanner {
 						),
 						array(
 							'key'     => self::META_STATUS,
-							'value'   => array( '', 'missing' ),
+							'value'   => array( '', 'missing', 'processing' ),
 							'compare' => 'IN',
 						),
 					),
@@ -218,6 +218,41 @@ class WIAA_Image_Scanner {
 					),
 				);
 		}
+	}
+
+
+	/**
+	 * Return attachment IDs for a workflow state without pagination.
+	 *
+	 * Used by persistent site-wide tasks. The task stores a snapshot of IDs and
+	 * rechecks each item before changing it.
+	 *
+	 * @param string $status Workflow status.
+	 * @return array<int,int>
+	 */
+	public function get_ids_by_status( $status ) {
+		$status = sanitize_key( (string) $status );
+
+		$query_args = array(
+			'post_type'              => 'attachment',
+			'post_status'            => 'inherit',
+			'post_mime_type'         => 'image',
+			'posts_per_page'         => -1,
+			'fields'                 => 'ids',
+			'orderby'                => 'ID',
+			'order'                  => 'ASC',
+			'no_found_rows'          => true,
+			'update_post_meta_cache' => false,
+			'update_post_term_cache' => false,
+		);
+
+		$meta_query = $this->build_meta_query( $status );
+		if ( ! empty( $meta_query ) ) {
+			$query_args['meta_query'] = $meta_query; // phpcs:ignore WordPress.DB.SlowDBQuery.slow_db_query_meta_query
+		}
+
+		$query = new WP_Query( $query_args );
+		return array_values( array_map( 'absint', $query->posts ) );
 	}
 
 	/**
@@ -308,7 +343,7 @@ class WIAA_Image_Scanner {
 		$pending = (int) $wpdb->get_var(
 			"SELECT COUNT(DISTINCT p.ID) {$base}
 				AND (alt.meta_value IS NULL OR alt.meta_value = '')
-				AND (status_meta.meta_value IS NULL OR status_meta.meta_value IN ('', 'missing'))
+				AND (status_meta.meta_value IS NULL OR status_meta.meta_value IN ('', 'missing', 'processing'))
 				AND (candidate_meta.meta_value IS NULL OR candidate_meta.meta_value = '')"
 		); // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.PreparedSQL.NotPrepared
 

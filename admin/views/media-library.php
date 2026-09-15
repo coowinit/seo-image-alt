@@ -53,6 +53,79 @@ $colspan          = $show_current_alt ? 7 : 6;
 		<div><strong data-count-key="failed"><?php echo esc_html( number_format_i18n( $counts['failed'] ) ); ?></strong><span>失败</span></div>
 	</div>
 
+
+	<section class="wiaa-global-bulk" id="wiaa-global-bulk">
+		<div class="wiaa-global-bulk-head">
+			<div>
+				<span class="wiaa-eyebrow">v1.1 全站批量任务</span>
+				<h2>大型媒体库模式</h2>
+				<p>不再受每页 20 张限制。AI 生成按图片顺序逐张执行并持久化进度；审核与应用使用服务器小批次处理。关闭或刷新页面后，重新打开即可继续。</p>
+			</div>
+			<span class="wiaa-badge is-ready" data-bulk-state-label>暂无任务</span>
+		</div>
+
+		<div class="wiaa-global-actions">
+			<button type="button" class="button" data-bulk-create data-requires-api="1" data-operation="generate" data-scope="pending" data-limit="20" <?php disabled( ! $is_configured ); ?>>测试生成 20 张</button>
+			<button type="button" class="button button-primary" data-bulk-create data-requires-api="1" data-operation="generate" data-scope="pending" data-limit="0" <?php disabled( ! $is_configured ); ?>>生成全部待处理</button>
+			<button type="button" class="button" data-bulk-create data-requires-api="1" data-operation="generate" data-scope="failed" data-limit="0" <?php disabled( ! $is_configured ); ?>>重试全部失败</button>
+			<button type="button" class="button" data-bulk-create data-operation="review" data-scope="eligible_content" data-limit="0">批量审核全部合格内容图</button>
+			<button type="button" class="button button-primary" data-bulk-create data-operation="apply" data-scope="reviewed" data-limit="0">应用全部已审核 ALT</button>
+		</div>
+
+		<div class="wiaa-global-task" data-bulk-task <?php echo empty( $bulk_task ) ? 'hidden' : ''; ?>>
+			<div class="wiaa-global-task-row">
+				<strong data-bulk-label><?php echo ! empty( $bulk_task['label'] ) ? esc_html( $bulk_task['label'] ) : '全站任务'; ?></strong>
+				<span data-bulk-progress-text></span>
+			</div>
+			<div class="wiaa-progress-track wiaa-global-progress"><span data-bulk-progress-bar></span></div>
+			<div class="wiaa-global-numbers">
+				<span>总数 <strong data-bulk-total>0</strong></span>
+				<span>已处理 <strong data-bulk-processed>0</strong></span>
+				<span>成功 <strong data-bulk-success>0</strong></span>
+				<span>失败 <strong data-bulk-failed>0</strong></span>
+				<span>跳过 <strong data-bulk-skipped>0</strong></span>
+				<span data-bulk-excluded-wrap hidden>未进入任务 <strong data-bulk-excluded>0</strong></span>
+			</div>
+			<p class="wiaa-global-message" data-bulk-message></p>
+			<div class="wiaa-global-controls">
+				<button type="button" class="button button-primary" data-test-results-toggle hidden>查看测试结果</button>
+				<button type="button" class="button" data-bulk-control="pause">暂停</button>
+				<button type="button" class="button button-primary" data-bulk-control="resume">继续</button>
+				<button type="button" class="button" data-bulk-control="stop">停止任务</button>
+			</div>
+		</div>
+
+		<div class="wiaa-test-results" id="wiaa-test-results" hidden>
+			<div class="wiaa-test-results-head">
+				<div>
+					<span class="wiaa-eyebrow">测试结果</span>
+					<h3>检查本次生成的 <span data-test-result-count>0</span> 张图片</h3>
+					<p>这里显示本次测试真正生成的 ALT。可以直接编辑、逐张审核，也可以只批量审核通过安全质量门槛的内容图。</p>
+				</div>
+				<div class="wiaa-test-actions">
+					<button type="button" class="button" data-test-review-good>审核通过合格内容图</button>
+					<button type="button" class="button" data-test-apply-reviewed>应用这批已审核 ALT</button>
+					<button type="button" class="button button-primary" data-test-generate-all <?php disabled( ! $is_configured ); ?>>生成全部剩余图片</button>
+				</div>
+			</div>
+			<div class="wiaa-table-wrap wiaa-test-table-wrap">
+				<table class="widefat striped wiaa-table wiaa-test-table">
+					<thead>
+						<tr>
+							<th class="wiaa-col-image">图片</th>
+							<th>AI 候选 / 审核</th>
+							<th class="wiaa-test-quality-col">质量提示</th>
+							<th class="wiaa-col-action">操作</th>
+						</tr>
+					</thead>
+					<tbody data-test-results-body></tbody>
+				</table>
+			</div>
+		</div>
+
+		<p class="wiaa-global-help"><strong>安全门槛：</strong>“批量审核全部合格内容图”只处理 AI 明确判断为 <code>content</code>、候选非空、不是 JSON、长度正常且当前原生 ALT 仍为空的图片；<code>decorative</code>、<code>uncertain</code>、异常候选继续保留人工处理。</p>
+	</section>
+
 	<nav class="nav-tab-wrapper wiaa-tabs">
 		<?php foreach ( $tabs as $tab_key => $tab_label ) : ?>
 			<?php
